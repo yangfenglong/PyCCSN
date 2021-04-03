@@ -17,7 +17,7 @@ sys.path.append('.')
 import useful_functions as uf
 
 def condition_g(adjmc, kk=50, dlimit=5):
-    """return the degree >5 and top kk ρ统计量的gene, b可优化参数>degree limit"""
+    """return the degree >5 and top kk ρ统计量的gene index, 可优化参数 > degree limit"""
     a = np.sum(adjmc, axis=1)
     id1 = np.argwhere(a >= dlimit)
     INDEX = np.argsort(a[id1.flatten()])[::-1]
@@ -144,11 +144,18 @@ class SSN:
                     lower.loc[(data.index[i], s2[range(k, k + s + 1)])] = data.loc[(data.index[i], s2[int(max(n0 * (n0 > h), k - h))])]
                 k = k + s + 1
 
+        # %If gene expression matrix is sparse, use the sparse matrix will accelerate
+        # %the calculation and reduce memory footprint
+        # %data = sparse(data); upper = sparse(upper); lower = sparse(lower);
+
         self.logger.info('finish caculate the neighborhood of each gene for each cell')
         cells = self.get_cells(cells=cells)
+
+
         csn = dict()
         B = pd.DataFrame(np.zeros((nr, nc)), columns=data.columns, index=data.index)
         p = -stats.norm.ppf(q=alpha, loc=0, scale=1)
+        
         for k in cells:
             for j in B.columns:
                 if average:
@@ -163,29 +170,29 @@ class SSN:
             if csnlink.sum().sum() == 0:
                 self.logger.info('no genes in Cell {} has a link'.format(k))
                 continue
-                if kk != 0:
-                    id = condition_g(csnlink, kk=kk, dlimit=dlimit)
-                    csnlink = pd.DataFrame(np.zeros([nr, nr])) if average else pd.DataFrame(np.ones([nr, nr]))
-                    for m in range(kk):
-                        B_z = B.iloc[id[m], :] * B
-                        idc = np.argwhere(B.iloc[id[m], :] != 0).flatten()
-                        B_z = B_z.iloc[:, idc]
-                        r = B_z.shape[1]
-                        a_z = np.mat(B_z.sum(axis=1))
-                        c_z = B_z @ B_z.T
-                        csnk1 = (c_z * r - a_z.T * a_z) / np.sqrt(np.multiply(a_z.T * a_z, (r - a_z).T * (r - a_z)) / (r - 1) + np.spacing(1))
-                        csnlink1 = (csnk1 > p) * 1
-                        csnlink = csnlink + csnlink1 if average else csnlink * csnlink1
+            if kk != 0:
+                id = condition_g(csnlink, kk=kk, dlimit=dlimit)
+                csnlink = pd.DataFrame(np.zeros([nr, nr])) if average else pd.DataFrame(np.ones([nr, nr]))
+                for m in range(kk):
+                    B_z = B.iloc[id[m], :] * B
+                    idc = np.argwhere(B.iloc[id[m], :] != 0).flatten()
+                    B_z = B_z.iloc[:, idc]
+                    r = B_z.shape[1]
+                    a_z = np.mat(B_z.sum(axis=1))
+                    c_z = B_z @ B_z.T
+                    csnk1 = (c_z * r - a_z.T * a_z) / np.sqrt(np.multiply(a_z.T * a_z, (r - a_z).T * (r - a_z)) / (r - 1) + np.spacing(1))
+                    csnlink1 = (csnk1 > p) * 1
+                    csnlink = csnlink + csnlink1 if average else csnlink * csnlink1
 
-                else:
-                    kk = 1
-                csnlink = csnlink / kk if average else csnlink
-                csn[k] = csnlink
-                if to_csv:
-                    filename = os.path.join(self.outdir, 'cellnws', '{}.nw.csv'.format(k))
-                    uf.create_dir(self.outdir + '/cellnws')
-                    csn[k].to_csv(path_or_buf=filename)
-                self.logger.info('Cell {} specific network is completed'.format(k))
+            else:
+                kk = 1
+            csnlink = csnlink / kk if average else csnlink
+            csn[k] = csnlink
+            if to_csv:
+                filename = os.path.join(self.outdir, 'cellnws', '{}.nw.csv'.format(k))
+                uf.create_dir(self.outdir + '/cellnws')
+                csn[k].to_csv(path_or_buf=filename)
+            self.logger.info('Cell {} specific network is completed'.format(k))
 
         self.logger.info('Finished constructing all {} cell specific networks'.format(len(cells)))
         self.upper = upper
@@ -252,21 +259,21 @@ class SSN:
                 self.logger.info('Cell {} has no network'.format(k))
                 NFE.loc[k] = None
                 continue
-                datak = np.mat(data.loc[:, k])
-                P = np.multiply(datak.T * datak, np.mat(csn[k]))
-                cc = P.sum(axis=1) != 0
-                idc = np.array(cc)[:, 0]
-                id = data.index[idc]
-                x = data.loc[(id, k)]
-                x_n = x / x.sum()
-                P1 = P[[id]][:, id]
-                P_n = P1 / P1.sum(axis=1)
-                x_p = pd.DataFrame(P_n) * np.array(x_n).reshape(-1, 1)
-                x_p[x_p == 0] = 1
-                NFE.loc[k] = -np.sum(np.sum(x_p * np.log(x_p)))
-                NFE.loc[k]
-                celln += 1
-                self.logger.info('network_flow_entropy of cell {} is {}'.format(k, NFE.loc[k][0]))
+            datak = np.mat(data.loc[:, k])
+            P = np.multiply(datak.T * datak, np.mat(csn[k]))
+            cc = P.sum(axis=1) != 0
+            idc = np.array(cc)[:, 0]
+            id = data.index[idc]
+            x = data.loc[(id, k)]
+            x_n = x / x.sum()
+            P1 = P[[id]][:, id]
+            P_n = P1 / P1.sum(axis=1)
+            x_p = pd.DataFrame(P_n) * np.array(x_n).reshape(-1, 1)
+            x_p[x_p == 0] = 1
+            NFE.loc[k] = -np.sum(np.sum(x_p * np.log(x_p)))
+            NFE.loc[k]
+            celln += 1
+            self.logger.info('network_flow_entropy of cell {} is {}'.format(k, NFE.loc[k][0]))
 
         self.NFE = NFE
         if to_csv:
